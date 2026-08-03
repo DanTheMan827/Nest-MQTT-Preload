@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+extern "C" {
+#include <mqtt.h>
+}
+
 class MqttMessageHandler {
 public:
     virtual ~MqttMessageHandler() {}
@@ -27,18 +31,16 @@ public:
 
 private:
     int fd_;
+    bool initialized_;
     Config cfg_;
     MqttMessageHandler *handler_;
-    uint16_t packet_id_;
-    uint64_t last_tx_ms_;
-    uint64_t last_rx_ms_;
-    std::vector<unsigned char> rx_;
+    struct mqtt_client client_;
+    std::vector<unsigned char> send_buffer_;
+    std::vector<unsigned char> recv_buffer_;
 
-    bool send_packet(unsigned char header, const std::vector<unsigned char> &body);
-    bool send_all(const unsigned char *data, size_t size);
-    bool read_available();
-    bool parse_packets();
-    bool handle_packet(unsigned char type_flags, const unsigned char *body, size_t size);
+    static void receive_publish(void **state, struct mqtt_response_publish *published);
+    bool sync(std::string *error);
+    bool wait_for_connect(std::string *error);
     void close_socket();
 };
 

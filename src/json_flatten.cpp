@@ -1,193 +1,46 @@
 #include "json_flatten.h"
 
 #include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <sstream>
 
+#include <picojson.h>
+
 namespace {
-
-class Parser {
-public:
-    Parser(const std::string &s, std::map<std::string, std::string> *out)
-        : s_(s), pos_(0), out_(out) {}
-
-    bool parse(std::string *error) {
-        skip_ws();
-        if (!value("", error)) return false;
-        skip_ws();
-        if (pos_ != s_.size()) return fail("trailing data", error);
-        return true;
-    }
-
-private:
-    const std::string &s_;
-    size_t pos_;
-    std::map<std::string, std::string> *out_;
-
-    bool fail(const char *msg, std::string *error) {
-        if (error) {
-            std::ostringstream os;
-            os << msg << " at byte " << pos_;
-            *error = os.str();
-        }
-        return false;
-    }
-
-    void skip_ws() {
-        while (pos_ < s_.size() && isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
-    }
-
-    bool string_value(std::string *out, std::string *error) {
-        if (pos_ >= s_.size() || s_[pos_] != '"') return fail("expected string", error);
-        ++pos_;
-        std::string v;
-        while (pos_ < s_.size()) {
-            char c = s_[pos_++];
-            if (c == '"') {
-                *out = v;
-                return true;
-            }
-            if (c != '\\') {
-                v.push_back(c);
-                continue;
-            }
-            if (pos_ >= s_.size()) return fail("truncated escape", error);
-            char e = s_[pos_++];
-            switch (e) {
-                case '"': v.push_back('"'); break;
-                case '\\': v.push_back('\\'); break;
-                case '/': v.push_back('/'); break;
-                case 'b': v.push_back('\b'); break;
-                case 'f': v.push_back('\f'); break;
-                case 'n': v.push_back('\n'); break;
-                case 'r': v.push_back('\r'); break;
-                case 't': v.push_back('\t'); break;
-                case 'u': {
-                    if (pos_ + 4 > s_.size()) return fail("truncated unicode escape", error);
-                    unsigned code = 0;
-                    for (int i = 0; i < 4; ++i) {
-                        char h = s_[pos_++];
-                        code <<= 4;
-                        if (h >= '0' && h <= '9') code += h - '0';
-                        else if (h >= 'a' && h <= 'f') code += h - 'a' + 10;
-                        else if (h >= 'A' && h <= 'F') code += h - 'A' + 10;
-                        else return fail("invalid unicode escape", error);
-                    }
-                    if (code < 0x80) v.push_back(static_cast<char>(code));
-                    else if (code < 0x800) {
-                        v.push_back(static_cast<char>(0xc0 | (code >> 6)));
-                        v.push_back(static_cast<char>(0x80 | (code & 0x3f)));
-                    } else {
-                        v.push_back(static_cast<char>(0xe0 | (code >> 12)));
-                        v.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
-                        v.push_back(static_cast<char>(0x80 | (code & 0x3f)));
-                    }
-                    break;
-                }
-                default: return fail("invalid escape", error);
-            }
-        }
-        return fail("unterminated string", error);
-    }
-
-    bool object(const std::string &path, std::string *error) {
-        ++pos_;
-        skip_ws();
-        if (pos_ < s_.size() && s_[pos_] == '}') {
-            ++pos_;
-            if (!path.empty()) (*out_)[path] = "{}";
-            return true;
-        }
-        while (pos_ < s_.size()) {
-            std::string key;
-            if (!string_value(&key, error)) return false;
-            skip_ws();
-            if (pos_ >= s_.size() || s_[pos_] != ':') return fail("expected colon", error);
-            ++pos_;
-            skip_ws();
-            std::string child = path.empty() ? key : path + "." + key;
-            if (!value(child, error)) return false;
-            skip_ws();
-            if (pos_ >= s_.size()) return fail("unterminated object", error);
-            if (s_[pos_] == '}') {
-                ++pos_;
-                return true;
-            }
-            if (s_[pos_] != ',') return fail("expected comma", error);
-            ++pos_;
-            skip_ws();
-        }
-        return fail("unterminated object", error);
-    }
-
-    bool array(const std::string &path, std::string *error) {
-        size_t start = pos_;
-        ++pos_;
-        skip_ws();
-        size_t index = 0;
-        if (pos_ < s_.size() && s_[pos_] == ']') {
-            ++pos_;
-            if (!path.empty()) (*out_)[path] = "[]";
-            return true;
-        }
-        while (pos_ < s_.size()) {
-            std::ostringstream child;
-            child << path << '[' << index << ']';
-            if (!value(child.str(), error)) return false;
-            ++index;
-            skip_ws();
-            if (pos_ >= s_.size()) return fail("unterminated array", error);
-            if (s_[pos_] == ']') {
-                ++pos_;
-                if (!path.empty()) (*out_)[path] = s_.substr(start, pos_ - start);
-                return true;
-            }
-            if (s_[pos_] != ',') return fail("expected comma", error);
-            ++pos_;
-            skip_ws();
-        }
-        return fail("unterminated array", error);
-    }
-
-    bool primitive(const std::string &path, std::string *error) {
-        size_t start = pos_;
-        while (pos_ < s_.size()) {
-            char c = s_[pos_];
-            if (c == ',' || c == '}' || c == ']' || isspace(static_cast<unsigned char>(c))) break;
-            ++pos_;
-        }
-        if (pos_ == start) return fail("expected value", error);
-        std::string v = s_.substr(start, pos_ - start);
-        if (v != "true" && v != "false" && v != "null") {
-            char *end = 0;
-            strtod(v.c_str(), &end);
-            if (!end || *end != '\0') return fail("invalid primitive", error);
-        }
-        if (!path.empty()) (*out_)[path] = v;
-        return true;
-    }
-
-    bool value(const std::string &path, std::string *error) {
-        skip_ws();
-        if (pos_ >= s_.size()) return fail("expected value", error);
-        if (s_[pos_] == '{') return object(path, error);
-        if (s_[pos_] == '[') return array(path, error);
-        if (s_[pos_] == '"') {
-            std::string v;
-            if (!string_value(&v, error)) return false;
-            if (!path.empty()) (*out_)[path] = v;
-            return true;
-        }
-        return primitive(path, error);
-    }
-};
 
 static std::string lower_copy(const std::string &s) {
     std::string out;
-    for (size_t i = 0; i < s.size(); ++i) out.push_back(static_cast<char>(tolower(static_cast<unsigned char>(s[i]))));
+    for (size_t i = 0; i < s.size(); ++i)
+        out.push_back(static_cast<char>(tolower(static_cast<unsigned char>(s[i]))));
     return out;
+}
+
+static void flatten_value(const picojson::value &value, const std::string &path,
+                          std::map<std::string, std::string> *out) {
+    if (value.is<picojson::object>()) {
+        const picojson::object &object = value.get<picojson::object>();
+        if (object.empty() && !path.empty()) (*out)[path] = "{}";
+        for (picojson::object::const_iterator it = object.begin(); it != object.end(); ++it) {
+            const std::string child = path.empty() ? it->first : path + "." + it->first;
+            flatten_value(it->second, child, out);
+        }
+        return;
+    }
+
+    if (value.is<picojson::array>()) {
+        const picojson::array &array = value.get<picojson::array>();
+        if (!path.empty()) (*out)[path] = value.serialize();
+        for (size_t i = 0; i < array.size(); ++i) {
+            std::ostringstream child;
+            child << path << '[' << i << ']';
+            flatten_value(array[i], child.str(), out);
+        }
+        return;
+    }
+
+    if (path.empty()) return;
+    if (value.is<std::string>()) (*out)[path] = value.get<std::string>();
+    else (*out)[path] = value.serialize();
 }
 
 }  // namespace
@@ -228,8 +81,17 @@ bool flatten_json(const std::string &json, std::map<std::string, std::string> *o
                   std::string *error) {
     if (!out) return false;
     out->clear();
-    Parser p(json, out);
-    return p.parse(error);
+
+    picojson::value root;
+    const std::string parse_error = picojson::parse(root, json);
+    if (!parse_error.empty()) {
+        if (error) *error = parse_error;
+        return false;
+    }
+
+    flatten_value(root, "", out);
+    if (error) error->clear();
+    return true;
 }
 
 bool json_key_is_sensitive(const std::string &path) {
@@ -256,24 +118,10 @@ std::string topic_component(const std::string &path) {
 }
 
 std::string json_escape(const std::string &value) {
-    std::ostringstream os;
-    for (size_t i = 0; i < value.size(); ++i) {
-        unsigned char c = static_cast<unsigned char>(value[i]);
-        switch (c) {
-            case '"': os << "\\\""; break;
-            case '\\': os << "\\\\"; break;
-            case '\b': os << "\\b"; break;
-            case '\f': os << "\\f"; break;
-            case '\n': os << "\\n"; break;
-            case '\r': os << "\\r"; break;
-            case '\t': os << "\\t"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    os << buf;
-                } else os << static_cast<char>(c);
-        }
+    const std::string serialized = picojson::value(value).serialize();
+    if (serialized.size() >= 2 && serialized[0] == '"' &&
+        serialized[serialized.size() - 1] == '"') {
+        return serialized.substr(1, serialized.size() - 2);
     }
-    return os.str();
+    return serialized;
 }

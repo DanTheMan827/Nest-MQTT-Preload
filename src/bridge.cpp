@@ -265,7 +265,7 @@ private:
         const std::string device = std::string("\"device\":{\"identifiers\":[\"") +
             json_escape(cfg_.device_id) + "\"],\"name\":\"" + json_escape(cfg_.device_name) +
             "\",\"manufacturer\":\"Nest Labs\",\"model\":\"Learning Thermostat\"}";
-        const std::string origin = "\"origin\":{\"name\":\"nest-mqtt-preload\",\"sw_version\":\"0.1.0\"}";
+        const std::string origin = std::string("\"origin\":{\"name\":\"nest-mqtt-preload\",\"sw_version\":\"") + NEST_MQTT_VERSION + "\"}";
         std::ostringstream climate;
         climate << '{'
             << "\"name\":\"" << json_escape(cfg_.device_name) << "\"," 
@@ -288,12 +288,12 @@ private:
             << "\"modes\":[\"off\",\"heat\",\"cool\",\"auto\"],"
             << "\"preset_modes\":[\"none\",\"eco\"],"
             << "\"temperature_unit\":\"C\",\"min_temp\":7,\"max_temp\":32,\"temp_step\":0.5} ";
-        mqtt_.publish(cfg_.discovery_prefix + "/climate/" + object + "/config", climate.str(), true);
+        enqueue(cfg_.discovery_prefix + "/climate/" + object + "/config", climate.str(), true);
 
         std::string battery = std::string("{\"name\":\"Battery level\",\"unique_id\":\"") +
             json_escape(object + "_battery") + "\",\"state_topic\":\"" +
             json_escape(cfg_.base_topic + "/state/battery_level") + "\"," + device + ',' + origin + '}';
-        mqtt_.publish(cfg_.discovery_prefix + "/sensor/" + object + "_battery/config", battery, true);
+        enqueue(cfg_.discovery_prefix + "/sensor/" + object + "_battery/config", battery, true);
     }
 
     void process_log(const std::string &line) {

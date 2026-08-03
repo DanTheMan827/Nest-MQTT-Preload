@@ -1,6 +1,6 @@
 # nest-mqtt-preload
 
-An experimental, dependency-free `LD_PRELOAD` library for the 32-bit ARM `nlclient` binary used by older Nest thermostats. It mirrors thermostat state to MQTT, publishes Home Assistant MQTT discovery, routes supported commands through the same local setters used by the native cloud bucket, and interposes the final hardware sleep entry point while loaded.
+An experimental `LD_PRELOAD` library for the 32-bit ARM `nlclient` binary used by older Nest thermostats. It mirrors thermostat state to MQTT, publishes Home Assistant MQTT discovery, routes supported commands through the same local setters used by the native cloud bucket, and interposes the final hardware sleep entry point while loaded.
 
 ## Firmware target and safety model
 
@@ -76,12 +76,22 @@ or environment variable:
 NEST_MQTT_BLOCK_SLEEP=false
 ```
 
+## Third-party libraries
+
+The handwritten MQTT codec and JSON parser have been removed. The build fetches two pinned, source-level dependencies:
+
+- **MQTT-C** (`7a986a68ebea63921d4aab20a9d1b26a8b5f8c9d`): portable nonblocking MQTT 3.1.1 client, MIT licensed.
+- **picojson** (`111c9be5188f7350c2eac9ddaedd8cca3d7bf394`): single-header C++ JSON parser/serializer, BSD-2-Clause licensed.
+
+`make deps` downloads only the required source and license files from those exact commits. Normal build and test targets invoke it automatically. See `third_party/README.md`.
+
 ## Build
 
 This project follows the toolchain convention used by `Nest-Spare-Key`:
 
 ```sh
 git submodule update --init --recursive
+make deps
 export CROSS="$TOOLCHAIN_CROSS-"
 make -j$(nproc) all check-exports
 make strip
@@ -89,7 +99,7 @@ make strip
 
 The included GitHub Actions workflow uses `cuckoo-nest/toolchain@main`, builds with `CROSS=${TOOLCHAIN_CROSS}-`, uploads unstripped and stripped artifacts, and creates releases for `v*` tags.
 
-A normal host compiler can validate the parser and non-ARM portions:
+A normal host compiler can validate picojson integration and the non-ARM portions:
 
 ```sh
 make host-test
@@ -160,4 +170,4 @@ A custom MQTT menu is not enabled. The decompiled executable identifies menu ass
 - Native writes are invoked from the MQTT worker thread. The cloud apply path mostly queues native events, but thread affinity has not been proven.
 - Humidity, HVAC action, fan state, and many capability fields depend on observed cloud/bucket JSON when no verified direct getter was found.
 - Fan control is read-only because no setter was mapped with sufficient confidence.
-- No MQTT TLS support is included.
+- MQTT-C is currently configured for plain TCP. TLS is not enabled.

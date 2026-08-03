@@ -1,3 +1,6 @@
 *.o
 *.so
-/tests/test_json
+tests/test_json
+third_party/.versions
+third_party/mqtt-c/
+third_party/picojson/

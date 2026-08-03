@@ -19,7 +19,10 @@ jobs:
         with:
           submodules: true
 
-      - name: Host parser tests
+      - name: Fetch pinned MQTT-C and picojson sources
+        run: make deps
+
+      - name: Host picojson tests
         run: make host-test
 
       - name: Setup Nest toolchain

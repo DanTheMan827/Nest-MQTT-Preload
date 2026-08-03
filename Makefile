@@ -6,32 +6,40 @@ AR      := $(CROSS)ar
 STRIP   := $(CROSS)strip
 
 TARGET  := libnest-mqtt-preload.so
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 
-CPPFLAGS := -Isrc -DNEST_MQTT_VERSION=\"$(VERSION)\"
-CFLAGS   := -Wall -Wextra -O2 -fPIC
+DEPS_STAMP := third_party/.versions
+MQTT_C_SRCS := third_party/mqtt-c/src/mqtt.c
+MQTT_C_OBJS := $(MQTT_C_SRCS:.c=.o)
+DEPS_FILES := $(MQTT_C_SRCS) third_party/mqtt-c/include/mqtt.h \
+              third_party/picojson/picojson.h
+
+CPPFLAGS := -Isrc -Ithird_party/mqtt-c/include -Ithird_party/picojson \
+            -DNEST_MQTT_VERSION=\"$(VERSION)\" -DMQTTC_PAL_FILE=mqtt_pal_nest.h
+CSTD     ?= -std=gnu99
+CFLAGS   := -Wall -Wextra -O2 -fPIC $(CSTD)
 # The Nest cross-toolchain predates the final C++11 option spelling.
-# The source intentionally stays C++03-compatible, so use the compiler default.
-# Newer toolchains may opt in, for example: make CXXSTD=-std=gnu++11
-CXXSTD  ?=
+# The project and both dependencies remain C++03-compatible.
+CXXSTD   ?=
 CXXFLAGS := -Wall -Wextra -O2 -fPIC $(CXXSTD) -fvisibility=hidden
 LDFLAGS  := -shared -Wl,-soname,$(TARGET) -Wl,--no-undefined
 LDLIBS   := -ldl -lpthread
 
-C_SRCS   := $(wildcard src/*.c)
+C_SRCS   := $(wildcard src/*.c) $(MQTT_C_SRCS)
 CPP_SRCS := $(wildcard src/*.cpp)
 OBJS     := $(C_SRCS:.c=.o) $(CPP_SRCS:.cpp=.o)
 
 all: $(TARGET)
 
-toolchain: toolchain/bootstrap.sh
-	${BASH} toolchain/bootstrap.sh
+deps: $(DEPS_STAMP)
 
-toolchain/bootstrap.sh:
-	git submodule update --init --recursive
-	
-	[ -f "$@" ] || git submodule update --init --recursive --force toolchain
-	[ -f "$@" ] && chmod +x "$@"
+$(DEPS_STAMP): scripts/fetch-deps.sh
+	./scripts/fetch-deps.sh
+
+$(DEPS_FILES): $(DEPS_STAMP)
+	@test -f "$@" || (echo "dependency file missing: $@; run make clean-deps deps" >&2; exit 1)
+
+$(OBJS): | $(DEPS_STAMP)
 
 $(TARGET): $(OBJS)
 	$(CXX) $(LDFLAGS) $(OBJS) -o "$@" $(LDLIBS)
@@ -49,11 +57,15 @@ check-exports: $(TARGET)
 	@$(CROSS)nm -D "$(TARGET)" | grep -E 'nlLogWithComponent|_ZN8nlWakeUp5SleepEv' || \
 	  (echo "required preload exports are missing" >&2; exit 1)
 
-host-test:
-	$(CXX) -Isrc $(CXXSTD) -Wall -Wextra -O2 tests/test_json.cpp src/json_flatten.cpp -o tests/test_json
+host-test: $(DEPS_FILES)
+	$(CXX) $(CPPFLAGS) $(CXXSTD) -Wall -Wextra -O2 \
+		tests/test_json.cpp src/json_flatten.cpp -o tests/test_json
 	./tests/test_json
 
 clean:
 	$(RM) $(OBJS) $(TARGET) tests/test_json
 
-.PHONY: all strip check-exports host-test clean
+clean-deps:
+	$(RM) -r third_party/mqtt-c third_party/picojson $(DEPS_STAMP)
+
+.PHONY: all deps strip check-exports host-test clean clean-deps
