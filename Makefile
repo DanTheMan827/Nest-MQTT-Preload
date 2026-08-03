@@ -10,7 +10,11 @@ VERSION ?= 0.1.0
 
 CPPFLAGS := -Isrc -DNEST_MQTT_VERSION=\"$(VERSION)\"
 CFLAGS   := -Wall -Wextra -O2 -fPIC
-CXXFLAGS := -Wall -Wextra -O2 -fPIC -std=gnu++11 -fvisibility=hidden
+# The Nest cross-toolchain predates the final C++11 option spelling.
+# The source intentionally stays C++03-compatible, so use the compiler default.
+# Newer toolchains may opt in, for example: make CXXSTD=-std=gnu++11
+CXXSTD  ?=
+CXXFLAGS := -Wall -Wextra -O2 -fPIC $(CXXSTD) -fvisibility=hidden
 LDFLAGS  := -shared -Wl,-soname,$(TARGET) -Wl,--no-undefined
 LDLIBS   := -ldl -lpthread
 
@@ -46,7 +50,7 @@ check-exports: $(TARGET)
 	  (echo "required preload exports are missing" >&2; exit 1)
 
 host-test:
-	$(CXX) -Isrc -std=gnu++11 -Wall -Wextra -O2 tests/test_json.cpp src/json_flatten.cpp -o tests/test_json
+	$(CXX) -Isrc $(CXXSTD) -Wall -Wextra -O2 tests/test_json.cpp src/json_flatten.cpp -o tests/test_json
 	./tests/test_json
 
 clean:
