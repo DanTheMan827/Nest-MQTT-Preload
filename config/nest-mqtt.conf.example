@@ -1,0 +1,18 @@
+# Protect this file: chmod 600 /data/nest-mqtt.conf
+mqtt_host=192.168.1.10
+mqtt_port=1883
+mqtt_username=homeassistant
+mqtt_password=change-me
+
+base_topic=nest/thermostat
+discovery_prefix=homeassistant
+device_name=Hallway Nest
+device_id=hallway_nest
+
+keepalive_seconds=30
+poll_seconds=5
+retain_state=true
+homeassistant_discovery=true
+publish_raw_properties=true
+native_writes=true
+block_sleep=true

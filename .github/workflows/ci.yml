@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    tags: 'v*'
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Host parser tests
+        run: make host-test
+
+      - name: Setup Nest toolchain
+        uses: cuckoo-nest/toolchain@main
+
+      - name: Build ARM preload library
+        env:
+          CROSS: ${{ env.TOOLCHAIN_CROSS }}-
+        run: make -j$(nproc) all check-exports
+
+      - name: Upload unstripped artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: build
+          path: ./libnest-mqtt-preload.so
+
+      - name: Strip
+        env:
+          CROSS: ${{ env.TOOLCHAIN_CROSS }}-
+        run: make strip
+
+      - name: Upload stripped artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: stripped
+          path: ./libnest-mqtt-preload.so
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download stripped artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: stripped
+          path: .
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: ./libnest-mqtt-preload.so
